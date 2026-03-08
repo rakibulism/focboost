@@ -22,6 +22,7 @@ const statusText      = document.getElementById('status-text');
 const activeTaskName  = document.getElementById('active-task-name');
 const focusDomainEl   = document.getElementById('focus-domain');
 const timerDisplay    = document.getElementById('timer-display');
+const sprintLabel     = document.getElementById('sprint-label');
 const endBtn          = document.getElementById('end-btn');
 // Complete
 const completeHeading = document.getElementById('complete-heading');
@@ -285,8 +286,12 @@ function showActive(task, domain) {
   welcomeBack.hidden = true;
   timerDisplay.textContent = '--:--';
   timerDisplay.classList.remove('paused');
+  sprintLabel.textContent = 'Sprint 1';
   showView(activeView);
   startTick();
+  chrome.storage.local.get(['sprintNumber'], ({ sprintNumber = 1 }) => {
+    sprintLabel.textContent = `Sprint ${sprintNumber}`;
+  });
 }
 
 // ── Complete view ──────────────────────────────────────────────────────────
@@ -356,7 +361,9 @@ function beginSession() {
 
   getCurrentDomain().then((domain) => {
     const ts = Date.now();
-    chrome.storage.local.set({
+
+    // The data to write for the fresh session — every key, nothing left ambiguous
+    const freshData = {
       task,
       focusSite:          domain,
       sprintMins:         selectedSprint,
@@ -369,17 +376,69 @@ function beginSession() {
       autoPausedAt:       null,
       totalDriftMs:       0,
       driftThresholdMs:   selectedSprint * 6000,
+      sprintNumber:       1,
       sessionSprintCount: 0,
       sessionTotalMins:   0,
       sessionDriftMs:     0,
       sessionFocusMs:     0,
       sprintCounted:      false,
-    }, () => {
-      chrome.runtime.sendMessage({ type: 'startFocus', focusSite: domain, sprintMins: selectedSprint }, () => {
-        startBtn.textContent = 'Start focusing';
-        showActive(task, domain);
+    };
+
+    const launch = () => {
+      chrome.storage.local.set(freshData, () => {
+        chrome.runtime.sendMessage(
+          { type: 'startFocus', focusSite: domain, sprintMins: selectedSprint },
+          () => { startBtn.textContent = 'Start focusing'; showActive(task, domain); }
+        );
       });
-    });
+    };
+
+    // Read previous session state BEFORE overwriting. If a meaningful session
+    // exists (had a task and at least one sprint's worth of data), save it to
+    // history first so it isn't silently lost.
+    chrome.storage.local.get(
+      ['task', 'sessionSprintCount', 'sessionDriftMs', 'sessionFocusMs',
+       'sessionHistory', 'sprintCounted', 'totalDriftMs', 'sprintMins',
+       'autoPaused', 'autoPausedAt'],
+      (prev) => {
+        const hadSession = prev.task &&
+          ((prev.sessionSprintCount || 0) > 0 || (prev.sessionFocusMs || 0) > 0);
+
+        if (!hadSession) { launch(); return; }
+
+        // Fold in any in-progress sprint that hasn't been counted yet
+        let focusMs = prev.sessionFocusMs || 0;
+        let driftMs = prev.sessionDriftMs || 0;
+
+        if (!prev.sprintCounted && prev.sprintMins) {
+          const sprintMs   = prev.sprintMins * 60000;
+          let sprintDrift  = prev.totalDriftMs || 0;
+          if (prev.autoPaused && prev.autoPausedAt) {
+            sprintDrift += Date.now() - prev.autoPausedAt;
+          }
+          sprintDrift  = Math.min(sprintDrift, sprintMs);
+          driftMs     += sprintDrift;
+          focusMs     += sprintMs - sprintDrift;
+        }
+
+        const total = focusMs + driftMs;
+        const score = total > 0 ? Math.round(focusMs / total * 100) : 100;
+        const entry = {
+          date:      Date.now(),
+          task:      prev.task,
+          sprints:   prev.sessionSprintCount || 0,
+          focusMins: Math.round(focusMs / 60000),
+          driftMins: Math.round(driftMs / 60000),
+          score,
+        };
+
+        const history = Array.isArray(prev.sessionHistory) ? prev.sessionHistory : [];
+        history.push(entry);
+        if (history.length > 50) history.splice(0, history.length - 50);
+
+        chrome.storage.local.set({ sessionHistory: history }, launch);
+      }
+    );
   });
 }
 
@@ -429,7 +488,8 @@ function takeBreak() {
         chrome.storage.local.remove(
           ['task', 'focusSite', 'sprintMins', 'sprintEndTime', 'startTime',
            'leftAt', 'lastNudgeAt', 'autoPaused', 'autoPausedAt', 'sprintDone',
-           'totalDriftMs', 'driftThresholdMs', 'sessionDriftMs', 'sessionFocusMs',
+           'totalDriftMs', 'driftThresholdMs', 'sprintNumber',
+           'sessionDriftMs', 'sessionFocusMs',
            'sessionSprintCount', 'sessionTotalMins', 'sprintCounted'],
           showIdle
         );
@@ -439,18 +499,19 @@ function takeBreak() {
 }
 
 function anotherSprint() {
-  chrome.storage.local.get(['task', 'focusSite', 'sprintMins'], ({ task, focusSite, sprintMins = 20 }) => {
+  chrome.storage.local.get(['task', 'focusSite', 'sprintMins', 'sprintNumber'], ({ task, focusSite, sprintMins = 20, sprintNumber = 1 }) => {
     selectedSprint = sprintMins;
     const ts = Date.now();
     chrome.storage.local.set({
-      sprintEndTime: ts + sprintMins * 60000,
-      sprintDone:    false,
-      leftAt:        null,
-      lastNudgeAt:   null,
-      autoPaused:    false,
-      autoPausedAt:  null,
+      sprintEndTime:    ts + sprintMins * 60000,
+      sprintDone:       false,
+      leftAt:           null,
+      lastNudgeAt:      null,
+      autoPaused:       false,
+      autoPausedAt:     null,
       totalDriftMs:     0,
       driftThresholdMs: sprintMins * 6000,
+      sprintNumber:     sprintNumber + 1,
       sprintCounted:    false,
     }, () => {
       chrome.runtime.sendMessage({ type: 'restartSprint', sprintMins }, () => {

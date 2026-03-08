@@ -197,7 +197,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.storage.local.set({
       leftAt: null, lastNudgeAt: null,
       autoPaused: false, autoPausedAt: null,
-      sprintDone: false, totalDriftMs: 0,
+      sprintDone: false, totalDriftMs: 0, sprintNumber: 1,
+      sessionSprintCount: 0, sessionTotalMins: 0,
+      sessionDriftMs: 0, sessionFocusMs: 0, sprintCounted: false,
     }, () => sendResponse({ ok: true }));
     return true;
   }
