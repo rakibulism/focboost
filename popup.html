@@ -8,8 +8,32 @@
 <body>
   <div class="shell">
 
+    <!-- ── Onboarding view ────────────────────────────────────── -->
+    <div id="onboard-view" class="view" hidden>
+
+      <div id="onboard-step-1" class="onboard-step">
+        <img src="boop-mascot.png" class="mascot-large" alt="Boop mascot" />
+        <p class="onboard-title">Hi! I'm Boop.</p>
+        <p class="onboard-body">I help you stay focused by gently nudging you when you drift.</p>
+        <button id="onboard-next-1" class="btn-primary">Next</button>
+      </div>
+
+      <div id="onboard-step-2" class="onboard-step" hidden>
+        <img src="boop-mascot.png" class="mascot-medium" alt="Boop mascot" />
+        <p class="onboard-body">Tell me what you're working on. Pick a sprint (5–20 mins). If you wander off, I'll tap your shoulder.</p>
+        <button id="onboard-next-2" class="btn-primary">Next</button>
+      </div>
+
+      <div id="onboard-step-3" class="onboard-step" hidden>
+        <img src="boop-mascot.png" class="mascot-medium" alt="Boop mascot" />
+        <p class="onboard-body">One last thing: let me send you notifications so I can reach you.</p>
+        <button id="onboard-finish" class="btn-primary">Let's go!</button>
+      </div>
+
+    </div>
+
     <!-- ── Setup view ─────────────────────────────────────────── -->
-    <div id="setup-view" class="view">
+    <div id="setup-view" class="view" hidden>
       <header class="header">
         <h1 class="wordmark">boop<span class="dot">.</span></h1>
         <p class="subtitle">gentle focus companion</p>
@@ -36,10 +60,23 @@
       </div>
 
       <button id="start-btn" class="btn-primary" disabled>Start focusing</button>
+
+      <div id="recent-sessions" class="recent-sessions" hidden></div>
     </div>
 
     <!-- ── Active view ────────────────────────────────────────── -->
     <div id="active-view" class="view" hidden>
+      <header class="header header-active">
+        <div class="header-logo">
+          <img src="boop-mascot.png" class="mascot-tiny" alt="" />
+          <h1 class="wordmark">boop<span class="dot">.</span></h1>
+        </div>
+      </header>
+
+      <div id="welcome-back" class="welcome-back" hidden>
+        <span id="welcome-back-text"></span>
+      </div>
+
       <div id="status-pill" class="status-pill status-on-track">
         <span class="status-dot"></span>
         <span id="status-text">Focusing</span>
@@ -57,19 +94,23 @@
 
     <!-- ── Complete view ──────────────────────────────────────── -->
     <div id="complete-view" class="view" hidden>
-      <header class="header">
-        <h1 class="wordmark">boop<span class="dot">.</span></h1>
-        <p class="subtitle">gentle focus companion</p>
-      </header>
-
       <div class="complete-block">
-        <p class="complete-emoji">🎉</p>
-        <p class="complete-heading">Sprint complete!</p>
+        <img src="boop-mascot.png" class="mascot-medium" alt="Boop mascot" />
+        <p id="complete-heading" class="complete-heading"></p>
+        <p id="complete-subtext" class="complete-subtext"></p>
         <p id="complete-summary" class="complete-summary"></p>
       </div>
+      <button id="another-btn" class="btn-primary">Go again</button>
+      <button id="done-btn" class="btn-end">Take a break</button>
+    </div>
 
-      <button id="another-btn" class="btn-primary">Another sprint</button>
-      <button id="done-btn" class="btn-end">I'm done</button>
+    <!-- ── Idle view ───────────────────────────────────────────── -->
+    <div id="idle-view" class="view" hidden>
+      <div class="idle-block">
+        <img src="boop-mascot.png" class="mascot-large" alt="Boop mascot" />
+        <p class="idle-text">Rest up. I'll be here.</p>
+      </div>
+      <button id="new-session-btn" class="btn-primary">Start fresh</button>
     </div>
 
   </div>

@@ -28,7 +28,7 @@ async function checkDrift() {
 
   const data = await chrome.storage.local.get([
     'task', 'focusSite', 'leftAt', 'lastNudgeAt',
-    'autoPaused', 'autoPausedAt', 'sprintEndTime', 'sprintDone',
+    'autoPaused', 'autoPausedAt', 'sprintEndTime', 'sprintDone', 'totalDriftMs', 'driftThresholdMs',
   ]);
   console.log('[boop] storage:', JSON.stringify(data));
 
@@ -72,6 +72,7 @@ async function checkDrift() {
       updates.autoPaused    = false;
       updates.autoPausedAt  = null;
       updates.sprintEndTime = newEnd;
+      updates.totalDriftMs  = (data.totalDriftMs || 0) + awayMs;
       needUpdate = true;
 
       if (remainingMins > 0) {
@@ -105,7 +106,8 @@ async function checkDrift() {
   const awayMs = now - data.leftAt;
   console.log('[boop] away for', (awayMs / 60000).toFixed(2), 'min | threshold:', (DRIFT_THRESHOLD_MS / 60000), 'min');
 
-  if (awayMs < DRIFT_THRESHOLD_MS) {
+  const threshold = data.driftThresholdMs || DRIFT_THRESHOLD_MS;
+  if (awayMs < threshold) {
     console.log('[boop] under threshold, no nudge yet');
     return;
   }
@@ -142,10 +144,16 @@ async function checkDrift() {
 // ── Sprint done ────────────────────────────────────────────────────────────
 async function handleSprintDone() {
   console.log('[boop] sprint done');
-  const data = await chrome.storage.local.get(['task', 'sprintMins']);
+  const data = await chrome.storage.local.get(['task', 'sprintMins', 'autoPaused', 'autoPausedAt', 'totalDriftMs']);
   if (!data.task) return;
 
-  await chrome.storage.local.set({ sprintDone: true });
+  // Capture any drift that was ongoing at the moment the sprint alarm fired
+  let totalDriftMs = data.totalDriftMs || 0;
+  if (data.autoPaused && data.autoPausedAt) {
+    totalDriftMs += Date.now() - data.autoPausedAt;
+  }
+
+  await chrome.storage.local.set({ sprintDone: true, totalDriftMs });
 
   const mins = data.sprintMins || 20;
   chrome.notifications.create('boop-sprint', {
@@ -189,7 +197,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.storage.local.set({
       leftAt: null, lastNudgeAt: null,
       autoPaused: false, autoPausedAt: null,
-      sprintDone: false,
+      sprintDone: false, totalDriftMs: 0,
     }, () => sendResponse({ ok: true }));
     return true;
   }
@@ -209,6 +217,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       lastNudgeAt:  null,
       autoPaused:   false,
       autoPausedAt: null,
+      totalDriftMs: 0,
     }, () => {
       chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: sprintMins });
       console.log('[boop] sprint restarted:', sprintMins, 'min');
