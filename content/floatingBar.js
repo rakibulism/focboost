@@ -1,279 +1,250 @@
 (function () {
     let host, shadow, bar;
     let isDragging = false;
-    let startX, startY, initialX, initialY;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
 
     console.log('[focboost] floatingBar.js loaded');
 
-    // ── Initialization ─────────────────────────────────────────────────────────
-    function init() {
-        chrome.storage.local.get(
-            ['sessionActive', 'sessionTask', 'sessionTimeLeft', 'sessionPaused', 'floatingBarEnabled', 'floatingBarPosition'],
-            (data) => {
-                console.log('[focboost] storage check on load:', data);
-                const enabled = data.floatingBarEnabled !== false;
-
-                if (data.sessionActive && enabled) {
-                    chrome.storage.session.get('barDismissed', (sessionData) => {
-                        if (!sessionData.barDismissed) {
-                            injectBar(data, data.floatingBarPosition);
-                        } else {
-                            console.log('[focboost] Bar dismissed for this session');
-                        }
-                    });
-                }
-            }
-        );
-    }
-
     // ── Injection ─────────────────────────────────────────────────────────────
-    function injectBar(data, savedPosition) {
-        if (document.getElementById('focboost-floating-host')) return;
+    function injectBar(task, timeLeft, isPaused, savedX, savedY) {
+        if (document.getElementById('focboost-host')) return;
         if (!document.body) {
             console.warn('[focboost] document.body not found, retrying...');
-            setTimeout(() => injectBar(data, savedPosition), 100);
+            setTimeout(() => {
+                chrome.storage.local.get(['sessionTask', 'sessionTimeLeft', 'sessionPaused', 'barPositionX', 'barPositionY'], (data) => {
+                    injectBar(data.sessionTask, data.sessionTimeLeft, data.sessionPaused, data.barPositionX, data.barPositionY);
+                });
+            }, 100);
             return;
         }
 
         console.log('[focboost] Injecting floating bar');
         host = document.createElement('div');
-        host.id = 'focboost-floating-host';
-        host.style.cssText = `
-            position: fixed;
-            z-index: 2147483647;
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            all: initial;
-        `;
-        document.body.appendChild(host);
+        host.id = 'focboost-host';
+        Object.assign(host.style, {
+            position: 'fixed',
+            bottom: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: '2147483647',
+            all: 'initial',
+            pointerEvents: 'auto'
+        });
 
-        shadow = host.attachShadow({ mode: 'closed' });
-
-        // Styles
-        const style = document.createElement('style');
-        style.textContent = `
-            .bar-container {
-                display: flex;
-                align-items: center;
-                background: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 999px;
-                padding: 8px 16px;
-                height: 44px;
-                box-sizing: border-box;
-                gap: 12px;
-                min-width: 280px;
-                max-width: 360px;
-                cursor: grab;
-                box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-                font-family: 'DM Sans', sans-serif;
-                user-select: none;
-                transition: opacity 0.2s ease, transform 0.2s ease;
-            }
-            .bar-container:active { cursor: grabbing; }
-            
-            .logo-mark {
-                width: 12px;
-                height: 12px;
-                background: #7C6FF7;
-                border-radius: 50%;
-                flex-shrink: 0;
-            }
-            .task-name {
-                font-size: 14px;
-                font-weight: 500;
-                color: #111827;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                max-width: 140px;
-            }
-            .timer-display {
-                font-family: 'DM Mono', monospace;
-                font-size: 14px;
-                color: #6B7280;
-                min-width: 45px;
-            }
-            .controls {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-left: auto;
-            }
-            .btn {
-                background: none;
-                border: none;
-                padding: 4px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                color: #6B7280;
-                transition: color 0.1s;
-            }
-            .btn:hover { color: #111827; }
-            .btn.active { color: #7C6FF7; }
-            
-            .separator {
-                width: 1px;
-                height: 20px;
-                background: #E5E7EB;
-                margin: 0 4px;
-            }
-            
-            @keyframes slideUp {
-                from { transform: translateY(20px); opacity: 0; }
-                to { transform: translateY(0); opacity: 1; }
-            }
-            .animate-in { animation: slideUp 0.2s ease forwards; }
-        `;
-        shadow.appendChild(style);
-
-        bar = document.createElement('div');
-        bar.className = 'bar-container animate-in';
-        updateBarContent(data);
-        shadow.appendChild(bar);
-
-        if (savedPosition) {
-            host.style.left = savedPosition.left;
-            host.style.top = savedPosition.top;
+        if (savedX && savedY) {
+            host.style.left = savedX;
+            host.style.top = savedY;
             host.style.bottom = 'auto';
             host.style.transform = 'none';
         }
 
-        setupDrag();
-        setupListeners();
-    }
+        document.body.appendChild(host);
+        shadow = host.attachShadow({ mode: 'closed' });
 
-    function updateBarContent(data) {
-        if (!bar) return;
-        const time = data.sessionTimeLeft;
-        const mins = Math.floor(time / 60);
-        const secs = time % 60;
-        const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        shadow.innerHTML = `
+      <style>
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+        .bar {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: #ffffff;
+          border: 1px solid #e0ddf6;
+          border-radius: 999px;
+          padding: 0 18px;
+          height: 44px;
+          font-family: 'DM Sans', sans-serif;
+          font-size: 13px;
+          color: #333333;
+          white-space: nowrap;
+          cursor: default;
+          user-select: none;
+          box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+          transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+        .logo {
+          color: #7C6FF7;
+          font-weight: 800;
+          font-size: 16px;
+          line-height: 1;
+        }
+        .divider {
+          width: 1px;
+          height: 20px;
+          background: #e0ddf6;
+          flex-shrink: 0;
+        }
+        .task {
+          max-width: 160px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          color: #444444;
+          font-size: 13px;
+        }
+        .timer {
+          font-family: 'DM Mono', monospace;
+          font-size: 13px;
+          font-weight: 600;
+          color: #7C6FF7;
+          min-width: 42px;
+        }
+        .timer.paused {
+          color: #aaaaaa;
+        }
+        .btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 4px 6px;
+          font-size: 15px;
+          line-height: 1;
+          border-radius: 6px;
+          transition: background 0.15s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .btn:hover {
+          background: #f0eeff;
+        }
+        .btn.close:hover {
+          background: #ffeaea;
+        }
+        .drag-handle {
+          cursor: grab;
+          padding: 0 6px 0 0;
+          color: #cccccc;
+          font-size: 12px;
+          letter-spacing: -2px;
+        }
+        .drag-handle:active {
+          cursor: grabbing;
+        }
+      </style>
+      <div class="bar" id="bar">
+        <span class="drag-handle">⠿</span>
+        <span class="logo">●</span>
+        <div class="divider"></div>
+        <span class="task" id="task-label" title="${task || 'Focus session'}">${task || 'Focus session'}</span>
+        <span class="timer ${isPaused ? 'paused' : ''}" id="countdown">--:--</span>
+        <button class="btn" id="pause-btn" title="Pause session">${isPaused ? '▶' : '⏸'}</button>
+        <button class="btn" id="distract-btn" title="Log distraction">😬</button>
+        <div class="divider"></div>
+        <button class="btn close" id="close-btn" title="Hide bar">✕</button>
+      </div>
+    `;
 
-        bar.innerHTML = `
-            <div class="logo-mark"></div>
-            <div class="task-name" title="${data.sessionTask}">${data.sessionTask}</div>
-            <div class="timer-display">${data.sessionPaused ? 'PAUSED' : timeStr}</div>
-            <div class="controls">
-                <button class="btn pause-btn ${data.sessionPaused ? 'active' : ''}">
-                    ${data.sessionPaused ?
-                `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>` :
-                `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`}
-                </button>
-                <button class="btn distraction-btn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M10 16c.5 1 1.5 1.5 2 1.5s1.5-.5 2-1.5"/></svg>
-                </button>
-                <div class="separator"></div>
-                <button class="btn dismiss-btn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-            </div>
-        `;
+        updateTimerDisplay(timeLeft);
 
-        bar.querySelector('.pause-btn').onclick = (e) => {
-            e.stopPropagation();
-            chrome.runtime.sendMessage({ type: data.sessionPaused ? 'resumeFocus' : 'pauseFocus' });
-        };
+        // Buttons
+        shadow.getElementById('pause-btn').addEventListener('click', () => {
+            chrome.runtime.sendMessage({ type: 'togglePause' }, (response) => {
+                const paused = response?.paused;
+                shadow.getElementById('pause-btn').textContent = paused ? '▶' : '⏸';
+                shadow.getElementById('countdown').classList.toggle('paused', paused);
+            });
+        });
 
-        bar.querySelector('.distraction-btn').onclick = (e) => {
-            e.stopPropagation();
+        shadow.getElementById('distract-btn').addEventListener('click', () => {
             chrome.runtime.sendMessage({ type: 'logDistraction' });
-        };
+            const btn = shadow.getElementById('distract-btn');
+            btn.style.transform = 'scale(1.3)';
+            setTimeout(() => btn.style.transform = 'scale(1)', 200);
+        });
 
-        bar.querySelector('.dismiss-btn').onclick = (e) => {
-            e.stopPropagation();
-            dismissBar();
-        };
-    }
-
-    function dismissBar() {
-        if (!bar) return;
-        bar.style.opacity = '0';
-        bar.style.transform = 'translateY(10px)';
-        setTimeout(() => {
-            if (host) {
-                host.remove();
-                host = null;
-                bar = null;
-            }
+        shadow.getElementById('close-btn').addEventListener('click', () => {
             chrome.storage.session.set({ barDismissed: true });
-        }, 150);
-    }
+            host.remove();
+        });
 
-    function setupDrag() {
-        if (!bar) return;
-        bar.addEventListener('mousedown', (e) => {
+        // Draggable
+        const barEl = shadow.getElementById('bar');
+        barEl.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('btn')) return;
             isDragging = true;
-            startX = e.clientX;
-            startY = e.clientY;
-            const rect = host.getBoundingClientRect();
-            initialX = rect.left;
-            initialY = rect.top;
-            bar.style.cursor = 'grabbing';
+            dragOffsetX = e.clientX - host.getBoundingClientRect().left;
+            dragOffsetY = e.clientY - host.getBoundingClientRect().top;
             host.style.transition = 'none';
-            e.preventDefault();
         });
 
         document.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            host.style.left = `${initialX + dx}px`;
-            host.style.top = `${initialY + dy}px`;
-            host.style.bottom = 'auto';
+            const x = e.clientX - dragOffsetX;
+            const y = e.clientY - dragOffsetY;
+            host.style.left = `${x}px`;
+            host.style.top = `${y}px`;
             host.style.transform = 'none';
+            host.style.bottom = 'auto';
         });
 
         document.addEventListener('mouseup', () => {
             if (!isDragging) return;
             isDragging = false;
-            bar.style.cursor = 'grab';
-            host.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-            const rect = host.getBoundingClientRect();
             chrome.storage.local.set({
-                floatingBarPosition: {
-                    left: host.style.left,
-                    top: host.style.top
-                }
+                barPositionX: host.style.left,
+                barPositionY: host.style.top
             });
         });
     }
 
-    function setupListeners() {
-        chrome.storage.onChanged.addListener((changes, area) => {
-            if (area === 'local') {
-                if (changes.sessionActive) {
-                    if (changes.sessionActive.newValue) {
-                        init(); // Re-initialize to inject
-                    } else if (host) {
-                        host.remove();
-                        host = null;
-                        bar = null;
-                    }
-                }
-                if (changes.sessionTimeLeft || changes.sessionPaused || changes.sessionTask) {
-                    if (bar) {
-                        chrome.storage.local.get(['sessionActive', 'sessionTask', 'sessionTimeLeft', 'sessionPaused'], (data) => {
-                            updateBarContent(data);
-                        });
-                    }
-                }
-                if (changes.floatingBarEnabled && changes.floatingBarEnabled.newValue === false && host) {
-                    host.remove();
-                    host = null;
-                    bar = null;
-                }
-            }
-            if (area === 'session' && changes.barDismissed && changes.barDismissed.newValue === true && host) {
-                host.remove();
-                host = null;
-                bar = null;
-            }
-        });
+    function updateTimerDisplay(t) {
+        const mm = String(Math.floor(t / 60)).padStart(2, '0');
+        const ss = String(t % 60).padStart(2, '0');
+        const el = shadow?.getElementById('countdown');
+        if (el) el.textContent = `${mm}:${ss}`;
     }
 
-    init();
+    // ── Initialization ─────────────────────────────────────────────────────────
+    chrome.storage.local.get(
+        ['sessionActive', 'sessionTask', 'sessionTimeLeft', 'sessionPaused', 'floatingBarEnabled', 'barPositionX', 'barPositionY'],
+        (data) => {
+            if (data.floatingBarEnabled === false) return;
+            if (!data.sessionActive) return;
+
+            chrome.storage.session.get('barDismissed', (result) => {
+                if (result.barDismissed) return;
+                injectBar(data.sessionTask, data.sessionTimeLeft, data.sessionPaused, data.barPositionX, data.barPositionY);
+            });
+        }
+    );
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local') return;
+
+        if (changes.sessionTimeLeft && shadow) {
+            updateTimerDisplay(changes.sessionTimeLeft.newValue);
+        }
+
+        if (changes.sessionTask && shadow) {
+            const el = shadow.getElementById('task-label');
+            if (el) {
+                el.textContent = changes.sessionTask.newValue;
+                el.title = changes.sessionTask.newValue;
+            }
+        }
+
+        if (changes.sessionActive) {
+            if (changes.sessionActive.newValue === false && host) {
+                host.remove();
+            } else if (changes.sessionActive.newValue === true && !host) {
+                chrome.storage.local.get(
+                    ['sessionTask', 'sessionTimeLeft', 'sessionPaused', 'floatingBarEnabled', 'barPositionX', 'barPositionY'],
+                    (data) => {
+                        if (data.floatingBarEnabled !== false) {
+                            injectBar(data.sessionTask, data.sessionTimeLeft, data.sessionPaused, data.barPositionX, data.barPositionY);
+                        }
+                    }
+                );
+            }
+        }
+
+        if (changes.floatingBarEnabled?.newValue === false && host) {
+            host.remove();
+        }
+    });
 })();

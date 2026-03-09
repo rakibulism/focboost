@@ -137,30 +137,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
-    case 'pauseFocus':
-      if (state.isActive && !state.isPaused) {
-        state.isPaused = true;
-        state.pauses++;
-        state.pauseStartTime = Date.now();
-        chrome.alarms.clear(ALARM_SPRINT);
+    case 'togglePause':
+      if (state.isActive) {
+        if (state.isPaused) {
+          // Resume
+          const pauseDuration = Date.now() - state.pauseStartTime;
+          state.isPaused = false;
+          state.endTime += pauseDuration;
+          state.pauseStartTime = null;
+          const remainingMs = Math.max(0, state.endTime - Date.now());
+          chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: remainingMs / 60000 });
+          startTicker();
+        } else {
+          // Pause
+          state.isPaused = true;
+          state.pauses++;
+          state.pauseStartTime = Date.now();
+          chrome.alarms.clear(ALARM_SPRINT);
+          stopTicker();
+        }
         saveState();
-        stopTicker();
+        sendResponse({ paused: state.isPaused });
       }
-      sendResponse({ success: true });
-      break;
-
-    case 'resumeFocus':
-      if (state.isActive && state.isPaused) {
-        const pauseDuration = Date.now() - state.pauseStartTime;
-        state.isPaused = false;
-        state.endTime += pauseDuration;
-        state.pauseStartTime = null;
-        const remainingMs = Math.max(0, state.endTime - Date.now());
-        chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: remainingMs / 60000 });
-        saveState();
-        startTicker();
-      }
-      sendResponse({ success: true });
       break;
 
     case 'stopFocus':
@@ -176,6 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           state.pauses++;
           state.pauseStartTime = Date.now();
           chrome.alarms.clear(ALARM_SPRINT);
+          stopTicker();
         }
         saveState();
         sendResponse({ success: true });
