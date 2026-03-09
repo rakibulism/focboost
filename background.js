@@ -21,6 +21,8 @@ let state = {
   settings: { notifications: true, autopause: true }
 };
 
+let ticker = null;
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 function calculateScore(distractions, pauses, difficulty) {
   let score = 100;
@@ -67,6 +69,22 @@ async function handleSprintDone() {
       message: `Your focus score: ${score}/100. Check your results in Focboost.`,
     });
   }
+
+  stopTicker();
+}
+
+function startTicker() {
+  if (ticker) clearInterval(ticker);
+  ticker = setInterval(() => {
+    if (state.isActive && !state.isPaused) {
+      saveState();
+    }
+  }, 1000);
+}
+
+function stopTicker() {
+  if (ticker) clearInterval(ticker);
+  ticker = null;
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
@@ -105,6 +123,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         saveState();
         chrome.storage.session.set({ barDismissed: false });
         chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: message.duration });
+        startTicker();
 
         if (settings.notifications) {
           chrome.notifications.create({
@@ -125,6 +144,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         state.pauseStartTime = Date.now();
         chrome.alarms.clear(ALARM_SPRINT);
         saveState();
+        stopTicker();
       }
       sendResponse({ success: true });
       break;
@@ -138,6 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const remainingMs = Math.max(0, state.endTime - Date.now());
         chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: remainingMs / 60000 });
         saveState();
+        startTicker();
       }
       sendResponse({ success: true });
       break;
@@ -171,3 +192,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     handleSprintDone();
   }
 });
+
+// Sync ticker if session already active on boot
+if (state.isActive && !state.isPaused) {
+  startTicker();
+}
