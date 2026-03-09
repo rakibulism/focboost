@@ -233,25 +233,58 @@
                 if (changes.focboostState) {
                     const newState = changes.focboostState.newValue;
                     if (newState && newState.isActive && !newState.sprintDone) {
-                        updateBarContent(newState);
+                        const enabled = true; // Temporary re-check if needed or rely on storage
+                        chrome.storage.local.get(['floatingBarEnabled'], (data) => {
+                            if (data.floatingBarEnabled !== false) {
+                                if (!host) {
+                                    chrome.storage.session.get('barDismissed', (sessionData) => {
+                                        if (!sessionData.barDismissed) {
+                                            injectBar(newState);
+                                        }
+                                    });
+                                } else {
+                                    updateBarContent(newState);
+                                }
+                            }
+                        });
                     } else {
-                        if (host) host.remove();
+                        if (host) {
+                            host.remove();
+                            host = null;
+                            bar = null;
+                        }
                     }
                 }
                 if (changes.floatingBarEnabled && changes.floatingBarEnabled.newValue === false) {
-                    if (host) host.remove();
+                    if (host) {
+                        host.remove();
+                        host = null;
+                        bar = null;
+                    }
                 }
             }
             if (area === 'session' && changes.barDismissed) {
-                if (changes.barDismissed.newValue === true && host) host.remove();
+                if (changes.barDismissed.newValue === true && host) {
+                    host.remove();
+                    host = null;
+                    bar = null;
+                }
             }
         });
 
-        // Update timer every second manually if active to avoid excessive storage writes
+        // Update timer every second manually if active
         setInterval(() => {
+            if (!bar) return; // Guard against updates before injection
             chrome.storage.local.get(['focboostState'], (data) => {
-                if (data.focboostState && data.focboostState.isActive && !data.focboostState.isPaused) {
-                    updateBarContent(data.focboostState);
+                const state = data.focboostState;
+                if (state && state.isActive && !state.isPaused && !state.sprintDone) {
+                    updateBarContent(state);
+                } else if (state && (state.sprintDone || !state.isActive)) {
+                    if (host) {
+                        host.remove();
+                        host = null;
+                        bar = null;
+                    }
                 }
             });
         }, 1000);
