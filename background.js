@@ -31,7 +31,13 @@ function calculateScore(distractions, pauses, difficulty) {
 }
 
 async function saveState() {
-  await chrome.storage.local.set({ focboostState: state });
+  await chrome.storage.local.set({
+    focboostState: state,
+    sessionActive: state.isActive,
+    sessionTask: state.task,
+    sessionTimeLeft: Math.round(Math.max(0, state.endTime - Date.now()) / 1000),
+    sessionPaused: state.isPaused
+  });
 }
 
 async function loadState() {
