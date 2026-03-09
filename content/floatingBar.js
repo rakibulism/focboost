@@ -6,6 +6,13 @@
 
     console.log('[focboost] floatingBar.js loaded');
 
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
     // ── Injection ─────────────────────────────────────────────────────────────
     function injectBar(task, timeLeft, isPaused, savedX, savedY) {
         if (document.getElementById('focboost-host')) return;
@@ -29,7 +36,9 @@
             transform: 'translateX(-50%)',
             zIndex: '2147483647',
             all: 'initial',
-            pointerEvents: 'auto'
+            pointerEvents: 'auto',
+            margin: '0',
+            padding: '0'
         });
 
         if (savedX && savedY) {
@@ -41,6 +50,8 @@
 
         document.body.appendChild(host);
         shadow = host.attachShadow({ mode: 'closed' });
+
+        const safeTask = escapeHtml(task || 'Focus session');
 
         shadow.innerHTML = `
       <style>
@@ -130,7 +141,7 @@
         <span class="drag-handle">⠿</span>
         <span class="logo">●</span>
         <div class="divider"></div>
-        <span class="task" id="task-label" title="${task || 'Focus session'}">${task || 'Focus session'}</span>
+        <span class="task" id="task-label" title="${safeTask}">${safeTask}</span>
         <span class="timer ${isPaused ? 'paused' : ''}" id="countdown">--:--</span>
         <button class="btn" id="pause-btn" title="Pause session">${isPaused ? '▶' : '⏸'}</button>
         <button class="btn" id="distract-btn" title="Log distraction">😬</button>
@@ -145,8 +156,10 @@
         shadow.getElementById('pause-btn').addEventListener('click', () => {
             chrome.runtime.sendMessage({ type: 'togglePause' }, (response) => {
                 const paused = response?.paused;
-                shadow.getElementById('pause-btn').textContent = paused ? '▶' : '⏸';
-                shadow.getElementById('countdown').classList.toggle('paused', paused);
+                const btn = shadow.getElementById('pause-btn');
+                if (btn) btn.textContent = paused ? '▶' : '⏸';
+                const count = shadow.getElementById('countdown');
+                if (count) count.classList.toggle('paused', paused);
             });
         });
 
@@ -160,39 +173,49 @@
         shadow.getElementById('close-btn').addEventListener('click', () => {
             chrome.storage.session.set({ barDismissed: true });
             host.remove();
+            host = null;
         });
 
         // Draggable
         const barEl = shadow.getElementById('bar');
         barEl.addEventListener('mousedown', (e) => {
-            if (e.target.classList.contains('btn')) return;
+            if (e.target.closest('.btn')) return;
             isDragging = true;
-            dragOffsetX = e.clientX - host.getBoundingClientRect().left;
-            dragOffsetY = e.clientY - host.getBoundingClientRect().top;
+            const rect = host.getBoundingClientRect();
+            dragOffsetX = e.clientX - rect.left;
+            dragOffsetY = e.clientY - rect.top;
             host.style.transition = 'none';
+            // Disable text selection during drag
+            document.body.style.userSelect = 'none';
         });
+    }
 
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            const x = e.clientX - dragOffsetX;
-            const y = e.clientY - dragOffsetY;
-            host.style.left = `${x}px`;
-            host.style.top = `${y}px`;
-            host.style.transform = 'none';
-            host.style.bottom = 'auto';
-        });
+    // Global Listeners for dragging (added once)
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging || !host) return;
+        const x = e.clientX - dragOffsetX;
+        const y = e.clientY - dragOffsetY;
 
-        document.addEventListener('mouseup', () => {
-            if (!isDragging) return;
-            isDragging = false;
+        host.style.left = `${x}px`;
+        host.style.top = `${y}px`;
+        host.style.bottom = 'auto';
+        host.style.transform = 'none';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        document.body.style.userSelect = '';
+        if (host) {
             chrome.storage.local.set({
                 barPositionX: host.style.left,
                 barPositionY: host.style.top
             });
-        });
-    }
+        }
+    });
 
     function updateTimerDisplay(t) {
+        if (t === undefined || t === null) return;
         const mm = String(Math.floor(t / 60)).padStart(2, '0');
         const ss = String(t % 60).padStart(2, '0');
         const el = shadow?.getElementById('countdown');
@@ -200,18 +223,22 @@
     }
 
     // ── Initialization ─────────────────────────────────────────────────────────
-    chrome.storage.local.get(
-        ['sessionActive', 'sessionTask', 'sessionTimeLeft', 'sessionPaused', 'floatingBarEnabled', 'barPositionX', 'barPositionY'],
-        (data) => {
-            if (data.floatingBarEnabled === false) return;
-            if (!data.sessionActive) return;
+    function init() {
+        chrome.storage.local.get(
+            ['sessionActive', 'sessionTask', 'sessionTimeLeft', 'sessionPaused', 'floatingBarEnabled', 'barPositionX', 'barPositionY'],
+            (data) => {
+                if (data.floatingBarEnabled === false) return;
+                if (!data.sessionActive) return;
 
-            chrome.storage.session.get('barDismissed', (result) => {
-                if (result.barDismissed) return;
-                injectBar(data.sessionTask, data.sessionTimeLeft, data.sessionPaused, data.barPositionX, data.barPositionY);
-            });
-        }
-    );
+                chrome.storage.session.get('barDismissed', (result) => {
+                    if (result.barDismissed) return;
+                    injectBar(data.sessionTask, data.sessionTimeLeft, data.sessionPaused, data.barPositionX, data.barPositionY);
+                });
+            }
+        );
+    }
+
+    init();
 
     chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== 'local') return;
@@ -228,9 +255,18 @@
             }
         }
 
+        if (changes.sessionPaused !== undefined && shadow) {
+            const paused = changes.sessionPaused.newValue;
+            const btn = shadow.getElementById('pause-btn');
+            if (btn) btn.textContent = paused ? '▶' : '⏸';
+            const count = shadow.getElementById('countdown');
+            if (count) count.classList.toggle('paused', paused);
+        }
+
         if (changes.sessionActive) {
             if (changes.sessionActive.newValue === false && host) {
                 host.remove();
+                host = null;
             } else if (changes.sessionActive.newValue === true && !host) {
                 chrome.storage.local.get(
                     ['sessionTask', 'sessionTimeLeft', 'sessionPaused', 'floatingBarEnabled', 'barPositionX', 'barPositionY'],
@@ -243,8 +279,22 @@
             }
         }
 
-        if (changes.floatingBarEnabled?.newValue === false && host) {
-            host.remove();
+        if (changes.floatingBarEnabled !== undefined) {
+            if (changes.floatingBarEnabled.newValue === false && host) {
+                host.remove();
+                host = null;
+            } else if (changes.floatingBarEnabled.newValue === true && !host) {
+                init();
+            }
+        }
+    });
+
+    // Handle barDismissed session storage changes
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'session' && changes.barDismissed) {
+            if (changes.barDismissed.newValue === false && !host) {
+                init();
+            }
         }
     });
 })();

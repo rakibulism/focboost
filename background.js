@@ -138,8 +138,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'togglePause':
+    case 'pauseFocus':
+    case 'resumeFocus':
       if (state.isActive) {
-        if (state.isPaused) {
+        const shouldPause = message.type === 'pauseFocus' || (message.type === 'togglePause' && !state.isPaused);
+
+        if (!shouldPause && state.isPaused) {
           // Resume
           const pauseDuration = Date.now() - state.pauseStartTime;
           state.isPaused = false;
@@ -148,7 +152,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const remainingMs = Math.max(0, state.endTime - Date.now());
           chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: remainingMs / 60000 });
           startTicker();
-        } else {
+        } else if (shouldPause && !state.isPaused) {
           // Pause
           state.isPaused = true;
           state.pauses++;
@@ -157,8 +161,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           stopTicker();
         }
         saveState();
-        sendResponse({ paused: state.isPaused });
       }
+      sendResponse({ paused: state.isPaused, isActive: state.isActive });
       break;
 
     case 'stopFocus':
@@ -183,6 +187,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       break;
   }
+  return true; // Keep message channel open for async responses if needed
 });
 
 // ── Alarms ─────────────────────────────────────────────────────────────────
