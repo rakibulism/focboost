@@ -66,7 +66,8 @@ const settingsElements = {
   addBtn: document.getElementById('add-site-btn'),
   backBtn: document.getElementById('settings-back-btn'),
   notifToggle: document.getElementById('notifications-toggle'),
-  autopauseToggle: document.getElementById('autopause-toggle')
+  autopauseToggle: document.getElementById('autopause-toggle'),
+  floatingBarToggle: document.getElementById('floating-bar-toggle')
 };
 
 // ── Initialization ─────────────────────────────────────────────────────────
@@ -359,14 +360,16 @@ async function initRecentSessions() {
 }
 
 async function initSettings() {
-  const data = await chrome.storage.local.get(['blockedSites', 'settings']);
+  const data = await chrome.storage.local.get(['blockedSites', 'settings', 'floatingBarEnabled']);
   let blocked = data.blockedSites || ['youtube.com', 'twitter.com', 'facebook.com', 'reddit.com'];
   let settings = data.settings || { notifications: true, autopause: true };
+  let floatingBarEnabled = data.floatingBarEnabled !== false;
 
   renderBlockedTags(blocked);
 
   settingsElements.notifToggle.checked = settings.notifications;
   settingsElements.autopauseToggle.checked = settings.autopause;
+  settingsElements.floatingBarToggle.checked = floatingBarEnabled;
 
   settingsElements.addBtn.onclick = async () => {
     const site = settingsElements.addInput.value.trim().toLowerCase();
@@ -380,6 +383,9 @@ async function initSettings() {
 
   settingsElements.notifToggle.onchange = () => saveSettings();
   settingsElements.autopauseToggle.onchange = () => saveSettings();
+  settingsElements.floatingBarToggle.onchange = () => {
+    chrome.storage.local.set({ floatingBarEnabled: settingsElements.floatingBarToggle.checked });
+  };
 
   function saveSettings() {
     chrome.storage.local.set({

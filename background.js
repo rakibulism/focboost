@@ -97,6 +97,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
 
         saveState();
+        chrome.storage.session.set({ barDismissed: false });
         chrome.alarms.create(ALARM_SPRINT, { delayInMinutes: message.duration });
 
         if (settings.notifications) {
