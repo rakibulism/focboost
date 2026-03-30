@@ -1,4 +1,41 @@
 console.log('[focboost] popup.js loaded');
+// ── DOM refs ───────────────────────────────────────────────────────────────
+const onboardView   = document.getElementById('onboard-view');
+const onboardStep1  = document.getElementById('onboard-step-1');
+const onboardStep2  = document.getElementById('onboard-step-2');
+const onboardStep3  = document.getElementById('onboard-step-3');
+const onboardNext1  = document.getElementById('onboard-next-1');
+const onboardNext2  = document.getElementById('onboard-next-2');
+const onboardFinish = document.getElementById('onboard-finish');
+const setupView    = document.getElementById('setup-view');
+const activeView   = document.getElementById('active-view');
+const completeView = document.getElementById('complete-view');
+const idleView     = document.getElementById('idle-view');
+// Setup
+const taskInput  = document.getElementById('task-input');
+const startBtn   = document.getElementById('start-btn');
+const sprintBtns = document.querySelectorAll('.sprint-btn');
+// Active
+const welcomeBack     = document.getElementById('welcome-back');
+const welcomeBackText = document.getElementById('welcome-back-text');
+const statusPill      = document.getElementById('status-pill');
+const statusText      = document.getElementById('status-text');
+const activeTaskName  = document.getElementById('active-task-name');
+const focusDomainEl   = document.getElementById('focus-domain');
+const timerDisplay    = document.getElementById('timer-display');
+const sprintLabel     = document.getElementById('sprint-label');
+const endBtn          = document.getElementById('end-btn');
+// Complete
+const completeHeading = document.getElementById('complete-heading');
+const completeSubtext = document.getElementById('complete-subtext');
+const completeSummary = document.getElementById('complete-summary');
+const anotherBtn      = document.getElementById('another-btn');
+const doneBtn         = document.getElementById('done-btn');
+// Idle
+const newSessionBtn   = document.getElementById('new-session-btn');
+// Setup extras
+const recentSessions  = document.getElementById('recent-sessions');
+const resetBtn        = document.getElementById('reset-btn');
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const PLACEHOLDERS = [
@@ -110,6 +147,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderWeeklyInsights();
     showView('weekly');
   });
+// ── Tick ───────────────────────────────────────────────────────────────────
+// Bug 1 fix: query the active tab FIRST, then decide timer state and status
+// together, so we can freeze the timer immediately on the same tick drift starts.
+function tick() {
+  chrome.storage.local.get(
+    ['sprintEndTime', 'autoPaused', 'autoPausedAt', 'sprintDone', 'leftAt', 'totalDriftMs'],
+    (data) => {
+      if (data.sprintDone) {
+        stopTick();
+        showComplete();
+        return;
+      }
 
   weeklyElements.backBtn.addEventListener('click', () => {
     showView('result');
@@ -119,6 +168,76 @@ document.addEventListener('DOMContentLoaded', async () => {
     initSettings();
     showView('settings');
   });
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const domain = tabs && tabs.length ? getDomain(tabs[0].url) : null;
+        const onSite = isSameSite(domain, currentFocusSite);
+
+        if (onSite) {
+          // ── On focus site ────────────────────────────────────────────────
+
+          // Bug 3: detect the moment of returning from drift
+          if (lastTickWasDrifted && data.leftAt) {
+            showWelcomeBack(data.leftAt);
+          }
+          lastTickWasDrifted = false;
+
+          statusPill.className = 'status-pill status-on-track';
+          statusText.textContent = 'Focusing';
+          timerDisplay.classList.remove('paused');
+
+          // If autoPaused is still set we just returned from a drift. Extend
+          // sprintEndTime immediately rather than waiting for the background
+          // alarm (which only fires every 30s).
+          if (data.autoPaused && data.autoPausedAt && data.sprintEndTime) {
+            const now      = Date.now();
+            const awayMs   = now - data.autoPausedAt;
+            const newEnd   = data.sprintEndTime + awayMs;
+            const remaining = (newEnd - now) / 60000;
+
+            chrome.storage.local.set({
+              autoPaused:   false,
+              autoPausedAt: null,
+              leftAt:       null,
+              lastNudgeAt:  null,
+              sprintEndTime: newEnd,
+              totalDriftMs: (data.totalDriftMs || 0) + awayMs,
+            });
+            if (remaining > 0) {
+              chrome.alarms.create('boop-sprint', { delayInMinutes: remaining });
+            }
+            chrome.notifications.clear('boop-drift');
+            timerDisplay.textContent = formatMS(newEnd - now);
+          } else if (data.sprintEndTime) {
+            timerDisplay.textContent = formatMS(data.sprintEndTime - Date.now());
+          }
+        } else {
+          // ── Drifting ─────────────────────────────────────────────────────
+          lastTickWasDrifted = true;
+          statusPill.className = 'status-pill status-drifted';
+          statusText.textContent = 'You wandered off';
+
+          if (!data.autoPaused) {
+            // Bug 1: first tick detecting drift — immediately pause without
+            // waiting for the 30-second background alarm.
+            const now = Date.now();
+            chrome.storage.local.set({
+              autoPaused:   true,
+              autoPausedAt: now,
+              leftAt:       data.leftAt || now,
+            });
+            if (data.sprintEndTime) {
+              timerDisplay.textContent = formatMS(data.sprintEndTime - now);
+            }
+          } else if (data.autoPausedAt && data.sprintEndTime) {
+            // Already paused — keep displaying the frozen time
+            timerDisplay.textContent = formatMS(data.sprintEndTime - data.autoPausedAt);
+          }
+          timerDisplay.classList.add('paused');
+        }
+      });
+    }
+  );
+}
 
   settingsElements.backBtn.addEventListener('click', () => {
     showView('home');
@@ -430,3 +549,36 @@ async function saveToHistory(state) {
   await chrome.storage.local.set({ history });
   initRecentSessions();
 }
+// ── Event listeners ────────────────────────────────────────────────────────
+taskInput.addEventListener('input', () => {
+  startBtn.disabled = taskInput.value.trim().length === 0;
+});
+taskInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !startBtn.disabled) beginSession();
+});
+startBtn.addEventListener('click', beginSession);
+endBtn.addEventListener('click', endSession);
+anotherBtn.addEventListener('click', anotherSprint);
+doneBtn.addEventListener('click', takeBreak);
+newSessionBtn.addEventListener('click', showSetup);
+resetBtn.addEventListener('click', () => {
+  if (window.confirm('Clear all Boop data?')) {
+    chrome.storage.local.clear(() => window.location.reload());
+  }
+});
+
+// ── Boot: restore state ────────────────────────────────────────────────────
+chrome.storage.local.get(
+  ['task', 'focusSite', 'sprintDone', 'onboardingComplete'],
+  ({ task, focusSite, sprintDone, onboardingComplete }) => {
+    if (!onboardingComplete) {
+      showOnboarding();
+    } else if (!task) {
+      showSetup();
+    } else if (sprintDone) {
+      showComplete();
+    } else {
+      showActive(task, focusSite || null);
+    }
+  }
+);
